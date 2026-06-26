@@ -3,7 +3,7 @@ from datetime import datetime
 
 TOKEN = "8698225504:AAGKuWc12_OMFTG1o9xUmpv5J9ztiz7JbRA"
 CHAT = "1041523200"
-API = "https://api.dexscreener.com/latest/dex/search"
+API = "https://api.dexscreener.com/?rankBy=trendingScoreH1&order=desc"
 
 try:
     params = {'q': 'trending', 'order': 'liquidity', 'limit': 50}
