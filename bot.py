@@ -1,113 +1,100 @@
 import requests
-import json
 from datetime import datetime
 
 TELEGRAM_TOKEN = "8698225504:AAGKuWc12_OMFTG1o9xUmpv5J9ztiz7JbRA"
 TELEGRAM_CHAT_ID = "1041523200"
 
-PHOTON_API = "https://api.photon-sol.tinyastro.io/trending"
+DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/search"
 
-def debug_photon():
+MIN_PRICE_CHANGE = -7.0
+MAX_PRICE_CHANGE = 7.0
+MIN_LIQUIDITY = 70000
+
+def get_qualified_pairs():
     try:
-        print("📡 Kết nối Photon API...")
-        response = requests.get(PHOTON_API, timeout=15)
+        print("📡 Kết nối DEXScreener API...")
+        params = {'q': 'trending', 'order': 'liquidity', 'limit': 50}
+        response = requests.get(DEXSCREENER_API, params=params, timeout=15)
         data = response.json()
         
-        print(f"✅ Kết nối thành công!\n")
-        
-        # In structure dữ liệu
-        print("📊 STRUCTURE DỮ LIỆU:")
-        print(f"Type: {type(data)}")
-        print(f"Keys: {list(data.keys()) if isinstance(data, dict) else 'Không phải dict'}\n")
-        
-        # Lấy tokens
-        if isinstance(data, dict):
-            tokens = data.get('tokens', [])
-        elif isinstance(data, list):
-            tokens = data
-        else:
-            tokens = []
-        
-        print(f"✅ Tổng tokens: {len(tokens)}\n")
-        
-        # In 5 token đầu
-        print("🔍 TOP 5 TOKENS CHI TIẾT:")
-        print("-" * 100)
-        
-        for idx, token in enumerate(tokens[:5], 1):
-            print(f"\n[Token {idx}]")
-            print(f"Type: {type(token)}")
-            
-            if isinstance(token, dict):
-                print("Keys có sẵn:")
-                for key in sorted(token.keys()):
-                    value = token[key]
-                    if isinstance(value, (dict, list)) and len(str(value)) > 100:
-                        print(f"  {key}: {type(value).__name__} (quá dài)")
-                    else:
-                        print(f"  {key}: {value}")
-            else:
-                print(f"Value: {token}")
-        
-        # Gửi Telegram
-        message = f"<b>🔍 DEBUG PHOTON API</b>\n\n"
-        message += f"✅ Kết nối thành công!\n"
-        message += f"📊 Tổng tokens: {len(tokens)}\n\n"
-        
-        message += f"<b>TOP 3 TOKENS:</b>\n\n"
-        
-        for idx, token in enumerate(tokens[:3], 1):
-            if isinstance(token, dict):
-                symbol = token.get('symbol', 'N/A')
-                name = token.get('name', 'N/A')
-                price = token.get('price', 'N/A')
+        pairs = []
+        if 'pairs' in data:
+            for pair in data['pairs']:
+                if pair.get('chainId', '').lower() != 'solana':
+                    continue
                 
-                # Thử lấy % thay đổi với các key khác nhau
-                change_h1 = 'N/A'
-                if 'priceChange' in token:
-                    if isinstance(token['priceChange'], dict):
-                        change_h1 = token['priceChange'].get('h1', 'N/A')
-                    else:
-                        change_h1 = token['priceChange']
-                elif 'h1' in token:
-                    change_h1 = token['h1']
-                elif 'change1h' in token:
-                    change_h1 = token['change1h']
+                price_change_h1 = float(pair.get('priceChange', {}).get('h1', 0) or 0)
                 
-                # Thử lấy liquidity
-                liquidity = 'N/A'
-                if 'liquidity' in token:
-                    liquidity = token['liquidity']
-                elif 'usd' in token and isinstance(token.get('liquidity'), dict):
-                    liquidity = token['liquidity']['usd']
+                # Lọc: ±7%
+                if price_change_h1 > MIN_PRICE_CHANGE and price_change_h1 < MAX_PRICE_CHANGE:
+                    continue
                 
-                message += f"<b>{idx}. {symbol}</b> - {name}\n"
-                message += f"├ Giá: {price}\n"
-                message += f"├ % 1h: {change_h1}\n"
-                message += f"└ Liquidity: {liquidity}\n\n"
+                liquidity = float(pair.get('liquidity', {}).get('usd', 0) or 0)
+                if liquidity < MIN_LIQUIDITY:
+                    continue
+                
+                pairs.append({
+                    'symbol': pair.get('baseToken', {}).get('symbol', '?'),
+                    'name': pair.get('baseToken', {}).get('name', '?'),
+                    'price': float(pair.get('priceUsd', 0) or 0),
+                    'price_change_h1': price_change_h1,
+                    'price_change_h6': float(pair.get('priceChange', {}).get('h6', 0) or 0),
+                    'price_change_h24': float(pair.get('priceChange', {}).get('h24', 0) or 0),
+                    'volume_h24': float(pair.get('volume', {}).get('h24', 0) or 0),
+                    'liquidity': liquidity,
+                    'url': pair.get('url', ''),
+                })
         
-        message += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
-        
-        # Gửi
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            req_data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-            requests.post(url, data=req_data, timeout=10)
-            print("✅ Đã gửi Telegram")
-        except:
-            pass
-        
+        print(f"✅ Lấy được {len(pairs)} pairs phù hợp")
+        return pairs
     except Exception as e:
         print(f"❌ Lỗi: {e}")
+        return []
+
+def create_message(pairs):
+    if not pairs:
+        return f"<b>ℹ️ Không có pair động lực</b>\n⏰ {datetime.now().strftime('%H:%M:%S')}"
+    
+    message = f"<b>🔥 PAIRS SOLANA (±7%, Liq 70k+)</b>\n\n"
+    
+    for idx, pair in enumerate(pairs[:10], 1):
+        symbol = pair.get('symbol', '?')
+        name = pair.get('name', '?')
+        price = pair.get('price', 0)
+        change_h1 = pair.get('price_change_h1', 0)
+        change_h6 = pair.get('price_change_h6', 0)
+        change_h24 = pair.get('price_change_h24', 0)
+        volume = pair.get('volume_h24', 0)
+        liquidity = pair.get('liquidity', 0)
         
-        # Gửi lỗi qua Telegram
-        message = f"<b>❌ LỖI DEBUG</b>\n\n{str(e)}\n\n⏰ {datetime.now().strftime('%H:%M:%S')}"
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            req_data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-            requests.post(url, data=req_data, timeout=10)
-        except:
-            pass
+        emoji = "📈" if change_h1 >= 0 else "📉"
+        url = pair.get('url', '')
+        dex_link = f"<a href='{url}'>🔗DEX</a>" if url else ""
+        
+        if price < 0.01:
+            price_str = f"{price:.8f}"
+        else:
+            price_str = f"{price:.4f}"
+        
+        message += f"<b>{idx}. {symbol}</b> - {name}\n"
+        message += f"├ ${price_str}\n"
+        message += f"├ {emoji} 1h: {change_h1:+.2f}% | 6h: {change_h6:+.2f}% | 24h: {change_h24:+.2f}%\n"
+        message += f"├ Vol: ${volume:,.0f} | Liq: ${liquidity:,.0f}\n"
+        message += f"└ {dex_link}\n\n"
+    
+    message += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+    return message
+
+def send_message(message):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
+        response = requests.post(url, data=data, timeout=10)
+        return response.status_code == 200
+    except:
+        return False
 
 if __name__ == "__main__":
-    debug_photon()
+    pairs = get_qualified_pairs()
+    message = create_message(pairs)
+    send_message(message)
