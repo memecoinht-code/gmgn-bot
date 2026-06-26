@@ -6,9 +6,9 @@ TELEGRAM_CHAT_ID = "1041523200"
 
 PHOTON_API = "https://api.photon-sol.tinyastro.io/trending"
 
-MIN_PRICE_CHANGE = -7.0
-MAX_PRICE_CHANGE = 7.0
-MIN_LIQUIDITY = 70000
+MIN_PRICE_CHANGE = -5.0
+MAX_PRICE_CHANGE = 5.0
+MIN_LIQUIDITY = 50000
 
 def get_qualified_tokens():
     try:
