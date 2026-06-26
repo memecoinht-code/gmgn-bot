@@ -4,47 +4,59 @@ from datetime import datetime
 TELEGRAM_TOKEN = "8698225504:AAGKuWc12_OMFTG1o9xUmpv5J9ztiz7JbRA"
 TELEGRAM_CHAT_ID = "1041523200"
 
-DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/search"
-
-def debug_dexscreener():
+def get_pairs():
     try:
-        print("📡 Kết nối DEXScreener...")
+        url = "https://api.dexscreener.com/latest/dex/search"
         params = {'q': 'trending', 'order': 'liquidity', 'limit': 50}
-        response = requests.get(DEXSCREENER_API, params=params, timeout=15)
+        response = requests.get(url, params=params, timeout=15)
         data = response.json()
         
-        print(f"✅ Kết nối thành công!")
-        
         pairs = data.get('pairs', [])
-        print(f"✅ Tổng pairs: {len(pairs)}\n")
         
-        # Lọc Solana
-        solana_pairs = [p for p in pairs if p.get('chainId', '').lower() == 'solana']
-        print(f"✅ Solana pairs: {len(solana_pairs)}\n")
-        
-        # In 10 pairs đầu (chi tiết)
-        print("🔍 TOP 10 SOLANA PAIRS:")
-        print("-" * 100)
-        
-        for idx, pair in enumerate(solana_pairs[:10], 1):
-            symbol = pair.get('baseToken', {}).get('symbol', 'N/A')
-            price = pair.get('priceUsd', 'N/A')
-            change_h1 = pair.get('priceChange', {}).get('h1', 'N/A')
-            liquidity = pair.get('liquidity', {}).get('usd', 'N/A')
+        # Lọc Solana + tiêu chí
+        result = []
+        for pair in pairs:
+            chain = pair.get('chainId', '').lower()
+            if chain != 'solana':
+                continue
             
-            print(f"\n{idx}. {symbol}")
-            print(f"   Giá: {price}")
-            print(f"   % 1h: {change_h1}")
-            print(f"   Liquidity: {liquidity}")
+            change = float(pair.get('priceChange', {}).get('h1', 0) or 0)
+            liq = float(pair.get('liquidity', {}).get('usd', 0) or 0)
+            
+            # Tiêu chí: ±7% + liquidity 70k
+            if (change <= -7.0 or change >= 7.0) and liq >= 70000:
+                result.append({
+                    'symbol': pair.get('baseToken', {}).get('symbol', '?'),
+                    'price': float(pair.get('priceUsd', 0) or 0),
+                    'change_h1': change,
+                    'change_h6': float(pair.get('priceChange', {}).get('h6', 0) or 0),
+                    'change_h24': float(pair.get('priceChange', {}).get('h24', 0) or 0),
+                    'volume': float(pair.get('volume', {}).get('h24', 0) or 0),
+                    'liquidity': liq,
+                    'url': pair.get('url', ''),
+                })
         
-        # Đếm coins đạt tiêu chí
-        print("\n\n📊 THỐNG KÊ TIÊU CHÍ:")
-        print("-" * 100)
+        return result
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+
+def send_telegram(pairs):
+    try:
+        if not pairs:
+            msg = "<b>ℹ️ Không có pair động lực</b>"
+        else:
+            msg = "<b>🔥 PAIRS SOLANA (±7%, Liq 70k+)</b>\n\n"
+            for i, p in enumerate(pairs[:10], 1):
+                emoji = "📈" if p['change_h1'] >= 0 else "📉"
+                msg += f"<b>{i}. {p['symbol']}</b>\n"
+                msg += f"├ ${p['price']:.8f}\n"
+                msg += f"├ {emoji} 1h: {p['change_h1']:+.2f}%\n"
+                msg += f"├ Vol: ${p['volume']:,.0f}\n"
+                msg += f"└ Liq: ${p['liquidity']:,.0f}\n\n"
         
-        count_change = 0
-        count_liq = 0
-        count_all = 0
+        msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
         
-        for pair in solana_pairs:
-            price_change_h1 = float(pair.get('priceChange', {}).get('h1', 0) or 0)
-            liquidity = float(pair.get('liquidity',
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
+        requests.post(url, data=data,
