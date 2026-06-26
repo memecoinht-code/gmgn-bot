@@ -2,16 +2,19 @@ name: GMGN Bot
 
 on:
   schedule:
-    - cron: '* * * * *'  # Chạy mỗi 1 phút
+    - cron: '*/3 * * * *'
   workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4.1.7
+      
+      - uses: actions/setup-python@v5.1.0
         with:
           python-version: '3.10'
+      
       - run: pip install -r requirements.txt
+      
       - run: python bot.py
