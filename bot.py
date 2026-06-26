@@ -4,124 +4,107 @@ from datetime import datetime
 TELEGRAM_TOKEN = "8698225504:AAGKuWc12_OMFTG1o9xUmpv5J9ztiz7JbRA"
 TELEGRAM_CHAT_ID = "1041523200"
 
-GMGN_API = "https://api.gmgn.ai/trending"
-CHAIN = "sol"
+PHOTON_API = "https://api.photon-sol.tinyastro.io/trending"
 
-def debug_coins():
+MIN_PRICE_CHANGE = -7.0
+MAX_PRICE_CHANGE = 7.0
+MIN_LIQUIDITY = 70000
+
+def get_qualified_tokens():
     try:
-        params = {"chain": CHAIN, "limit": 200}
-        response = requests.get(GMGN_API, params=params, timeout=15)
+        print("📡 Kết nối Photon API...")
+        response = requests.get(PHOTON_API, timeout=15)
         data = response.json()
-        tokens = data.get("data", [])
         
-        print(f"✅ Lấy được {len(tokens)} tokens\n")
+        tokens = data.get('tokens', []) if isinstance(data, dict) else data
         
-        # In chi tiết 10 token đầu tiên
-        print("TOP 10 COINS:")
-        print("-" * 80)
-        for idx, token in enumerate(tokens[:10], 1):
-            symbol = token.get('symbol', 'N/A')
-            price = token.get('price', 0)
-            change_1m = token.get('price_change_1m', 'N/A')
-            change_5m = token.get('price_change_5m', 'N/A')
-            change_1h = token.get('price_change_1h', 'N/A')
-            liquidity = token.get('liquidity', 0)
-            age_days = "N/A"
-            
-            created_at = token.get('created_at')
-            if created_at:
-                try:
-                    created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                    age_days = (datetime.now(created_time.tzinfo) - created_time).days
-                except:
-                    pass
-            
-            print(f"\n{idx}. {symbol}")
-            print(f"   Giá: ${price}")
-            print(f"   % Thay đổi 1m: {change_1m}% | 5m: {change_5m}% | 1h: {change_1h}%")
-            print(f"   Liquidity: ${liquidity:,.0f}")
-            print(f"   Tuổi: {age_days} ngày")
-            print(f"   Twitter: {'✅' if token.get('socials', {}).get('twitter') else '❌'}")
-            print(f"   Mintable: {'❌ (Bad)' if token.get('is_mintable') else '✅'}")
-            print(f"   Blacklist: {'❌ (Bad)' if token.get('is_blacklisted') else '✅'}")
-            print(f"   LP Burned: {'✅' if token.get('lp_burned') else '❌'}")
-            print(f"   Freeze Auth: {'❌ (Bad)' if token.get('freeze_authority') else '✅'}")
+        print(f"✅ Lấy được {len(tokens)} tokens")
         
-        # Gửi Telegram
-        message = f"<b>🔍 DEBUG GMGN</b>\n\n"
-        message += f"✅ Tổng tokens: {len(tokens)}\n\n"
-        
-        # Đếm coins đạt từng tiêu chí
-        count_change = 0
-        count_age = 0
-        count_liq = 0
-        count_twitter = 0
-        count_mint = 0
-        count_blacklist = 0
-        count_lp = 0
-        count_freeze = 0
-        count_all = 0
+        qualified_tokens = []
         
         for token in tokens:
-            change = token.get('price_change_1m', token.get('price_change_5m', 0))
-            if change <= -7 or change >= 7:
-                count_change += 1
+            # Lấy thông tin
+            price = float(token.get('price', 0) or 0)
+            price_change = float(token.get('priceChange', {}).get('h1', 0) or 0) if isinstance(token.get('priceChange'), dict) else 0
+            liquidity = float(token.get('liquidity', 0) or 0)
+            volume = float(token.get('volume', {}).get('h24', 0) or 0) if isinstance(token.get('volume'), dict) else 0
             
-            created_at = token.get('created_at')
-            if created_at:
-                try:
-                    created_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                    age_days = (datetime.now(created_time.tzinfo) - created_time).days
-                    if age_days >= 3:
-                        count_age += 1
-                except:
-                    pass
+            # Lọc: ±7%
+            if price_change > MIN_PRICE_CHANGE and price_change < MAX_PRICE_CHANGE:
+                continue
             
-            liq = token.get('liquidity', 0)
-            if liq >= 70000:
-                count_liq += 1
+            # Lọc: liquidity 70k+
+            if liquidity < MIN_LIQUIDITY:
+                continue
             
-            if token.get('socials', {}).get('twitter'):
-                count_twitter += 1
-            
-            if not token.get('is_mintable'):
-                count_mint += 1
-            
-            if not token.get('is_blacklisted'):
-                count_blacklist += 1
-            
-            if token.get('lp_burned'):
-                count_lp += 1
-            
-            if not token.get('freeze_authority'):
-                count_freeze += 1
-            
-            # Tất cả tiêu chí
-            if (change <= -7 or change >= 7) and age_days >= 3 and liq >= 70000 and token.get('socials', {}).get('twitter') and not token.get('is_mintable') and not token.get('is_blacklisted') and token.get('lp_burned') and not token.get('freeze_authority'):
-                count_all += 1
+            qualified_tokens.append({
+                'symbol': token.get('symbol', 'N/A'),
+                'name': token.get('name', 'N/A'),
+                'price': price,
+                'price_change_h1': price_change,
+                'price_change_h6': float(token.get('priceChange', {}).get('h6', 0) or 0) if isinstance(token.get('priceChange'), dict) else 0,
+                'price_change_h24': float(token.get('priceChange', {}).get('h24', 0) or 0) if isinstance(token.get('priceChange'), dict) else 0,
+                'volume': volume,
+                'liquidity': liquidity,
+                'url': token.get('url', ''),
+                'mint': token.get('mint', ''),
+            })
         
-        message += f"<b>📊 THỐNG KÊ TIÊU CHÍ:</b>\n"
-        message += f"📈 % Thay đổi ±7%: {count_change}\n"
-        message += f"📅 Tuổi 3+ ngày: {count_age}\n"
-        message += f"💧 Liquidity 70k+: {count_liq}\n"
-        message += f"🐦 Có Twitter: {count_twitter}\n"
-        message += f"🚫 Không mint: {count_mint}\n"
-        message += f"✅ Không blacklist: {count_blacklist}\n"
-        message += f"🔥 LP burned: {count_lp}\n"
-        message += f"❄️ Freeze auth: {count_freeze}\n"
-        message += f"\n<b>✅ ĐẠT TẤT CẢ TIÊU CHÍ: {count_all}</b>\n"
-        message += f"\n⏰ {datetime.now().strftime('%H:%M:%S')}"
-        
-        # Gửi
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-            requests.post(url, data=data, timeout=10)
-        except:
-            pass
+        print(f"✅ Lọc được {len(qualified_tokens)} tokens")
+        return qualified_tokens
         
     except Exception as e:
         print(f"❌ Lỗi: {e}")
+        return []
+
+def create_message(tokens):
+    if not tokens:
+        return f"<b>ℹ️ Không có token động lực</b>\n⏰ {datetime.now().strftime('%H:%M:%S')}"
+    
+    message = f"<b>🔥 TOKENS SOLANA (Photon - ±7%, Liq 70k+)</b>\n\n"
+    
+    for idx, token in enumerate(tokens[:10], 1):
+        symbol = token.get('symbol', '?')
+        name = token.get('name', '?')
+        price = token.get('price', 0)
+        change_h1 = token.get('price_change_h1', 0)
+        change_h6 = token.get('price_change_h6', 0)
+        change_h24 = token.get('price_change_h24', 0)
+        volume = token.get('volume', 0)
+        liquidity = token.get('liquidity', 0)
+        mint = token.get('mint', '')
+        
+        emoji = "📈" if change_h1 >= 0 else "📉"
+        
+        if price < 0.01:
+            price_str = f"{price:.8f}"
+        else:
+            price_str = f"{price:.4f}"
+        
+        message += f"<b>{idx}. {symbol}</b> - {name}\n"
+        message += f"├ Giá: <code>${price_str}</code>\n"
+        message += f"├ {emoji} 1h: <code>{change_h1:+.2f}%</code> | 6h: <code>{change_h6:+.2f}%</code> | 24h: <code>{change_h24:+.2f}%</code>\n"
+        message += f"├ Vol: <code>${volume:,.0f}</code> | Liq: <code>${liquidity:,.0f}</code>\n"
+        
+        if mint:
+            message += f"├ Mint: <code>{mint[:20]}...</code>\n"
+        
+        message += f"└ <a href='https://photon-sol.tinyastro.io/token/{mint}'>🔗Photon</a>\n\n" if mint else f"└ Link\n\n"
+    
+    message += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+    return message
+
+def send_message(message):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
+        response = requests.post(url, data=data, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Lỗi gửi: {e}")
+        return False
 
 if __name__ == "__main__":
-    debug_coins()
+    tokens = get_qualified_tokens()
+    message = create_message(tokens)
+    send_message(message)
